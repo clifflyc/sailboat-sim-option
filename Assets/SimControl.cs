@@ -82,6 +82,8 @@ public class SimControl : MonoBehaviour {
 	public float currentStrength = 5;
 	[NonSerializedAttribute]
 	public float currentDirection;
+	[NonSerializedAttribute]
+	public float targetHeading = 0;
 
 	[NonSerializedAttribute]
 	public Vector2 boatPos;
@@ -93,10 +95,15 @@ public class SimControl : MonoBehaviour {
 	public float boatHeading;
 
 	[NonSerializedAttribute]
-	public Vector2[] waypoints;
+	public Vector2[] waypoints = new Vector2[0];
 
-	float timeSinceLastSend = 0;
 	bool ready = false;
+
+	void Start () {
+		InvokeRepeating ("PublishCurrentPos", 0.2f, 0.2f);
+		InvokeRepeating ("PublishWaypoints", 1f, 1f);
+		InvokeRepeating ("PublishWindDirection", 0.5f, 0.5f);
+	}
 
 	//entry point
 	public void InitSimulation (string ip) {
@@ -104,28 +111,33 @@ public class SimControl : MonoBehaviour {
 		string fullUrl = "ws://" + ip;
 		RosInterface.Connect (fullUrl);
 		RosInterface.Subscribe<BoatState> ("/boat_state", "boat_msgs/BoatState").MessageReceived += OnBoatStateMsg;
-		RosInterface.Subscribe<Float32> ("/rudder", "std_msgs/Float32").MessageReceived += OnRudderMsg;
+		RosInterface.Subscribe<Float32> ("/target_heading", "std_msgs/Float32").MessageReceived += OnHeadingMsg;
 		RosInterface.Subscribe<Float32> ("/winch", "std_msgs/Int32").MessageReceived += OnWinchMsg;
 		RosInterface.Advertise ("/lps", "boat_msgs/Point");
 		RosInterface.Advertise ("/waypoints", "boat_msgs/PointArray");
 		RosInterface.Advertise ("/anemometer", "std_msgs/Float32");
 		ready = true;
+
+		PublishWaypoints ();
+		PublishWindDirection ();
+		boatPos = boatVel = boatAccel = Vector2.zero;
+		PublishCurrentPos ();
 	}
 
 	void OnBoatStateMsg (BoatState state) {
 		this.boatState = state;
 	}
 
-	void OnRudderMsg (Float32 rudderMsg) {
-		this.rudderValue = rudderMsg.data;
+	void OnHeadingMsg (Float32 headingMsg) {
+		this.targetHeading = headingMsg.data;
+	}
+		
+	void OnWinchMsg (Float32 winchMsg) {
+		this.winchValue = winchMsg.data;
 	}
 
 	public void SetRudder (float rudder) {
 		this.rudderValue = rudder;
-	}
-
-	void OnWinchMsg (Float32 winchMsg) {
-		this.winchValue = winchMsg.data;
 	}
 
 	public void SetWindStrength (float windStrength) {
@@ -146,19 +158,21 @@ public class SimControl : MonoBehaviour {
 
 	public void SetWaypoints (Vector2[] waypoints) {
 		this.waypoints = waypoints;
-		PublishWaypoints (waypoints);
 	}
 
-	void PublishCurrentPos (Vector2 currentPos) {
-		RosInterface.Publish<Point> ("/lps", new Point (currentPos));
+	void PublishCurrentPos () {
+		if (ready)
+			RosInterface.Publish<Point> ("/lps", new Point (boatPos));
 	}
 
-	void PublishWaypoints (Vector2[] waypoints) {
-		RosInterface.Publish<PointArray> ("/waypoints", new PointArray (waypoints));
+	void PublishWaypoints () {
+		if (ready)
+			RosInterface.Publish<PointArray> ("/waypoints", new PointArray (waypoints));
 	}
 
-	void PublishWindDirection (float windDirection) {
-		RosInterface.Publish<Float32> ("/anemometer", new Float32 (windDirection));
+	void PublishWindDirection () {
+		if (ready)
+			RosInterface.Publish<Float32> ("/anemometer", new Float32 (windDirection));
 	}
 
 	//--------------------------//
@@ -166,12 +180,6 @@ public class SimControl : MonoBehaviour {
 	void Update () {
 		if (ready) {	
 			UpdateBoatPosVelAccel (rudderValue, winchValue, windStrength, windDirection, currentStrength, currentDirection, ref boatHeading, ref boatPos, ref boatVel, ref boatAccel);
-			if (timeSinceLastSend > 0.2f) {
-				PublishCurrentPos (boatPos);
-				PublishWindDirection (windDirection);
-				timeSinceLastSend = 0;
-			}
-			timeSinceLastSend += Time.deltaTime;
 		}
 	}
 
@@ -187,10 +195,7 @@ public class SimControl : MonoBehaviour {
 
 		float deltaAngle = Mathf.Abs (Mathf.DeltaAngle (heading, windDirection));
 		float boatSpeed = -deltaAngle * (deltaAngle - 180) * 0.00012345678f * windStrength; //quadratically map 0 to 180 into 0 to 1, * current strength
-		velocity = Quaternion.Euler (new Vector3 (0, 0, heading)) * Vector3.up * boatSpeed;
+		velocity = Quaternion.Euler (new Vector3 (0, 0, heading)) * Vector3.right * boatSpeed;
 		position += velocity * Time.deltaTime;
 	}
-
-
-
 }

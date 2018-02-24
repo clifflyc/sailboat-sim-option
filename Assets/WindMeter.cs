@@ -9,7 +9,7 @@ public class WindMeter : MonoBehaviour {
 	[SerializeField] UILabel strengthValueLabel;
 
 	void Update () {
-		dialHand.transform.eulerAngles = new Vector3 (0, 0, sim.windDirection);
+		dialHand.transform.eulerAngles = new Vector3 (0, 0, sim.windDirection - 90);//this -90 is because 0 degrees here is upwards.
 		strengthValueLabel.SetString (sim.windStrength);
 	}
 }
